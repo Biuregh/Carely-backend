@@ -1,8 +1,27 @@
 const express = require("express");
 const User = require("../models/user");
 const verifyToken = require("../middleware/verify-token");
+const requireRole = require("../middleware/require-role");
 
 const router = express.Router();
+
+// GET /users/providers  (list providers, admin/reception only)
+router.get(
+  "/providers",
+  verifyToken,
+  requireRole("admin", "reception"),
+  async (req, res) => {
+    try {
+      const providers = await User.find(
+        { role: "provider" },
+        "username role calendarId active"
+      ).sort({ username: 1 });
+      res.json(providers);
+    } catch (err) {
+      res.status(500).json({ err: err.message });
+    }
+  }
+);
 
 // GET /users  (list basic info)
 router.get("/", verifyToken, async (req, res) => {
