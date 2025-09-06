@@ -1,9 +1,16 @@
-import Patient from "../models/Patient";
+import Patient from "../src/models/Patient";
 
 const getPatients = async (req, res) => {
     try {
-        const {}
-        const patients = await Patient.find();
+        const { name, phone, dob, email } = req.query;
+
+        const filter = {};
+        if (name) filter.name = new RegExp(name, i);
+        if (phone) filter.phone = new RegExp(phone, i);
+        if (email) filter.email = new RegExp(email, i);
+        if(dob) filter.dob = dob;
+
+        const patients = await Patient.find(filter);
         res.json(patients);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -50,7 +57,7 @@ const deletePatient = async (req, res) => {
     }
 }
 
-export default{
+export default {
     getPatient,
     getPatients,
     createPatient,
