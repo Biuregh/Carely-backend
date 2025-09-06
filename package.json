@@ -1,5 +1,5 @@
 {
-  "name": "carely-backend",
+"name": "carely-backend",
   "version": "1.0.0",
   "description": "<!-- # React + Vite",
   "main": "index.js",
@@ -9,11 +9,16 @@
   "keywords": [],
   "author": "",
   "license": "ISC",
-  "dependencies": {
+"dependencies": {
+    "bcrypt": "^6.0.0",
+    "cookie-session": "^2.1.1",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.2",
-    "express": "^5.1.0",
-    "mongoose": "^8.18.0"
+    "dotenv": "^16.6.1",
+    "express": "^4.21.2",
+    "googleapis": "^135.1.0",
+    "jsonwebtoken": "^9.0.2",
+    "mongoose": "^8.18.0",
+    "morgan": "^1.10.1"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"
