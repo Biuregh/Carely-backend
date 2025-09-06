@@ -9,4 +9,4 @@ router.post("/", patient.createPatient);
 router.put("/:id", patient.updatePatient);
 router.delete("/:id", patient.deletePatient);
 
-model.exports = router;
+module.exports = router;

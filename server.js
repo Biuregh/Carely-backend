@@ -14,6 +14,7 @@ const authRouter = require("./controllers/auth");
 const testJwtRouter = require("./controllers/test-jwt");
 const usersRouter = require("./controllers/users");
 const gcalRouter = require("./controllers/gcal"); // <-- NEW
+const patientsRouter = require("./routes/patientRoutes")
 
 // --- DB ---
 mongoose.connect(process.env.MONGODB_URI);
@@ -35,13 +36,14 @@ app.use(
   })
 );
 app.use(morgan("dev"));
+app.use("/patients", patientsRouter);
 
 // --- Health check ---
 app.get("/healthz", (req, res) => res.json({ ok: true }));
 
 // --- App routers ---
 app.use("/auth", authRouter);
-app.use("/test-jwt", testJwtRouter);
+app.use("/test-jwt", testJwtRouter); 
 app.use("/users", usersRouter);
 app.use(gcalRouter); // <-- mounts /oauth/google and /api/gcal/*
 

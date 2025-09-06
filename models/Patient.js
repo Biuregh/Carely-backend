@@ -1,11 +1,11 @@
-import mongoose from "mongoose";
+const mongoose =require("mongoose");
 
 const patientSchema = new mongoose.Schema(
     {
-        name: { type: String, required },
-        email: { type: String, unique: true, required },
-        dob: { type: Date, required },
-        ohone: { type: String, required },
+        name: { type: String, required: true },
+        email: { type: String, unique: true, required: true, lowercase: true },
+        dob: { type: Date, required: true },
+        phone: { type: String, required: true },
         notes: String,
         allergies: [String],
         medication: [String]
@@ -13,4 +13,4 @@ const patientSchema = new mongoose.Schema(
     { timestamps: true }
 );
 
-export default mongoose.model("Patient", patientSchema);
+module.exports = mongoose.model("Patient", patientSchema)
