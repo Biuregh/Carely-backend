@@ -1,8 +1,13 @@
+// models/user.js
 const mongoose = require("mongoose");
 
 const userSchema = new mongoose.Schema(
   {
+    // Login identifier (currently an email string)
     username: { type: String, required: true, unique: true },
+
+    // Screen name for providers (e.g., "John Smith, MD")
+    displayName: { type: String, default: "" }, // NEW
 
     // keep hashed password; never store raw password
     hashedPassword: { type: String, required: true },

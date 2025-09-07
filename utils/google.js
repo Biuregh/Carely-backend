@@ -12,7 +12,7 @@ function makeOAuth() {
 // Require Google cookie-session tokens
 function requireGoogle(req, res, next) {
   if (!req.session || !req.session.tokens) {
-    return res.status(401).json({ error: "Not connected to Google" });
+    return res.status(401).json({ err: "Not connected to Google" });
   }
   next();
 }

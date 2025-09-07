@@ -1,13 +1,22 @@
 const express = require("express");
 const { google } = require("googleapis");
+const jwt = require("jsonwebtoken");
 const User = require("../models/user");
+const Setting = require("../models/setting");
 const verifyToken = require("../middleware/verify-token");
 const requireRole = require("../middleware/require-role");
-const { makeOAuth, requireGoogle, getFreeBusy } = require("../utils/google");
 
 const router = express.Router();
 
-// Small helper to surface Google HTTP codes instead of generic 500s
+function makeOAuth() {
+  return new google.auth.OAuth2(
+    process.env.GCAL_CLIENT_ID,
+    process.env.GCAL_CLIENT_SECRET,
+    process.env.GCAL_REDIRECT_URI
+  );
+}
+
+// ---------- helpers ----------
 function googleErr(res, err) {
   const status = err?.response?.status || 500;
   const msg =
@@ -15,25 +24,102 @@ function googleErr(res, err) {
   return res.status(status).json({ error: msg });
 }
 
-/* ---------- OAuth ---------- */
-
-router.get("/oauth/google", (req, res) => {
+async function getClinicOAuth() {
+  const tokens = await Setting.get("google_app_tokens");
+  if (!tokens || !tokens.access_token) return null;
   const oauth2 = makeOAuth();
-  const url = oauth2.generateAuthUrl({
-    access_type: "offline",
-    prompt: "consent",
-    scope: [
-      "https://www.googleapis.com/auth/calendar.events",
-      "https://www.googleapis.com/auth/calendar.readonly",
-    ],
+  oauth2.setCredentials(tokens);
+  // keep tokens fresh in DB
+  oauth2.on("tokens", async (t) => {
+    const merged = { ...(tokens || {}), ...t };
+    await Setting.set("google_app_tokens", merged);
   });
-  res.redirect(url);
-});
+  return oauth2;
+}
 
-router.get("/oauth/google/callback", async (req, res, next) => {
+async function requireClinicOAuth(req, res, next) {
+  try {
+    const oauth = await getClinicOAuth();
+    if (!oauth)
+      return res.status(401).json({ error: "Clinic Google not connected" });
+    req.oauth = oauth;
+    next();
+  } catch (e) {
+    next(e);
+  }
+}
+
+// Create a secondary calendar owned by the clinic account
+async function createClinicCalendar(oauth2, summary) {
+  const calendar = google.calendar({ version: "v3", auth: oauth2 });
+  const { data } = await calendar.calendars.insert({
+    requestBody: { summary },
+  });
+  await calendar.calendarList
+    .insert({ requestBody: { id: data.id } })
+    .catch(() => {});
+  return data.id; // calendarId
+}
+
+// Ensure the provider has a clinic-owned calendar (group id)
+async function ensureClinicOwnedCalendar(oauth2, provider) {
+  if (
+    !provider.calendarId ||
+    !String(provider.calendarId).includes("@group.calendar.google.com")
+  ) {
+    const title = provider.displayName?.trim() || provider.username;
+    const id = await createClinicCalendar(oauth2, title);
+    provider.calendarId = id;
+    await provider.save();
+  }
+}
+
+// ---------- App-level OAuth (admin only) ----------
+router.get(
+  "/oauth/google/app",
+  verifyToken,
+  requireRole("admin"),
+  (req, res) => {
+    const oauth2 = makeOAuth();
+    const url = oauth2.generateAuthUrl({
+      access_type: "offline",
+      prompt: "consent",
+      scope: ["https://www.googleapis.com/auth/calendar"],
+      state: jwt.sign({ by: req.user._id }, process.env.JWT_SECRET, {
+        expiresIn: "30m",
+      }),
+    });
+    res.redirect(url);
+  }
+);
+
+// JSON endpoint to fetch Auth URL (so we can include Bearer token)
+router.get(
+  "/oauth/google/app/url",
+  verifyToken,
+  requireRole("admin"),
+  (req, res) => {
+    const oauth2 = makeOAuth();
+    const url = oauth2.generateAuthUrl({
+      access_type: "offline",
+      prompt: "consent",
+      scope: ["https://www.googleapis.com/auth/calendar"],
+      state: jwt.sign(
+        { by: req.user._id, ts: Date.now() },
+        process.env.JWT_SECRET,
+        { expiresIn: "10m" }
+      ),
+    });
+    res.json({ url });
+  }
+);
+
+// Callback saves tokens to Settings
+router.get("/oauth/google/app/callback", async (req, res, next) => {
   try {
     const oauth2 = makeOAuth();
     const { tokens } = await oauth2.getToken(req.query.code);
+    await Setting.set("google_app_tokens", tokens);
     req.session.tokens = tokens;
     res.redirect("http://localhost:5173/connected");
   } catch (err) {
@@ -41,43 +127,79 @@ router.get("/oauth/google/callback", async (req, res, next) => {
   }
 });
 
-router.post("/oauth/google/disconnect", (req, res) => {
-  req.session = null;
-  res.json({ ok: true });
-});
-
-router.get("/oauth/google/scopes", requireGoogle, (req, res) => {
-  res.json({ scope: req.session.tokens?.scope || null });
-});
-
-/* ---------- Debug: list calendars ---------- */
-router.get("/api/gcal/calendars", requireGoogle, async (req, res) => {
-  try {
-    const oauth2 = makeOAuth();
-    oauth2.setCredentials(req.session.tokens);
-    const calendar = google.calendar({ version: "v3", auth: oauth2 });
-    const { data } = await calendar.calendarList.list({ maxResults: 250 });
-
-    res.json(
-      (data.items || []).map((c) => ({
-        id: c.id, // use this as provider.calendarId
-        summary: c.summary,
-        accessRole: c.accessRole, // owner | writer | reader | freeBusyReader
-      }))
-    );
-  } catch (err) {
-    return googleErr(res, err);
-  }
-});
-
-/* ---------- Calendar APIs ---------- */
-
-// Create event (double-booking protected)
+// Disconnect clinic tokens
 router.post(
-  "/api/gcal/events",
-  requireGoogle,
+  "/oauth/google/app/disconnect",
+  verifyToken,
+  requireRole("admin"),
+  async (req, res) => {
+    await Setting.set("google_app_tokens", null);
+    res.json({ ok: true });
+  }
+);
+
+// For debugging: list calendars for the clinic account
+router.get(
+  "/api/gcal/calendars",
   verifyToken,
   requireRole("admin", "reception", "provider"),
+  requireClinicOAuth,
+  async (req, res) => {
+    try {
+      const calendar = google.calendar({ version: "v3", auth: req.oauth });
+      const { data } = await calendar.calendarList.list({ maxResults: 250 });
+      res.json(
+        (data.items || []).map((c) => ({
+          id: c.id,
+          summary: c.summary,
+          accessRole: c.accessRole,
+        }))
+      );
+    } catch (err) {
+      return googleErr(res, err);
+    }
+  }
+);
+
+// ---------- Provider calendar bootstrap (admin/reception) ----------
+router.post(
+  "/api/gcal/providers/:id/ensure-calendar",
+  verifyToken,
+  requireRole("admin", "reception"),
+  requireClinicOAuth,
+  async (req, res) => {
+    try {
+      const provider = await User.findOne({
+        _id: req.params.id,
+        role: "provider",
+        active: true,
+      });
+      if (!provider)
+        return res
+          .status(404)
+          .json({ error: "Provider not found or inactive" });
+
+      await ensureClinicOwnedCalendar(req.oauth, provider);
+
+      return res.json({
+        ok: true,
+        providerId: String(provider._id),
+        calendarId: provider.calendarId,
+      });
+    } catch (err) {
+      return googleErr(res, err);
+    }
+  }
+);
+
+// ---------- Event APIs (use clinic tokens) ----------
+
+// Create (double-booking protected)
+router.post(
+  "/api/gcal/events",
+  verifyToken,
+  requireRole("admin", "reception", "provider"),
+  requireClinicOAuth,
   async (req, res) => {
     try {
       const {
@@ -90,58 +212,52 @@ router.post(
       } = req.body;
 
       let effectiveProviderId = providerId;
-      if (req.user.role === "provider") {
-        effectiveProviderId = req.user._id;
-      } else if (!effectiveProviderId) {
+      if (req.user.role === "provider") effectiveProviderId = req.user._id;
+      else if (!effectiveProviderId)
         return res.status(400).json({ error: "providerId is required" });
-      }
 
-      if (!startISO || !endISO) {
+      if (!startISO || !endISO)
         return res
           .status(400)
           .json({ error: "startISO and endISO are required" });
-      }
-      if (new Date(startISO) >= new Date(endISO)) {
+      if (new Date(startISO) >= new Date(endISO))
         return res.status(400).json({ error: "endISO must be after startISO" });
-      }
 
-      const providerUser = await User.findOne({
+      const provider = await User.findOne({
         _id: effectiveProviderId,
         role: "provider",
         active: true,
       });
-      if (!providerUser) {
+      if (!provider)
         return res
           .status(404)
           .json({ error: "Provider user not found or inactive" });
-      }
-      if (!providerUser.calendarId) {
-        return res
-          .status(400)
-          .json({ error: "Provider has no calendarId configured" });
-      }
 
-      const oauth2 = makeOAuth();
-      oauth2.setCredentials(req.session.tokens);
+      await ensureClinicOwnedCalendar(req.oauth, provider);
 
-      const { free, busy } = await getFreeBusy(oauth2, {
-        calendarId: providerUser.calendarId,
-        startISO,
-        endISO,
+      const calendar = google.calendar({ version: "v3", auth: req.oauth });
+
+      // free/busy check
+      const { data: fb } = await calendar.freebusy.query({
+        requestBody: {
+          timeMin: startISO,
+          timeMax: endISO,
+          items: [{ id: provider.calendarId }],
+        },
       });
-      if (!free) {
-        const first = busy[0] || null;
+      const busy = fb?.calendars?.[provider.calendarId]?.busy || [];
+      if (busy.length) {
+        const first = busy[0];
         return res.status(409).json({
           ok: false,
           error: "Time range is already booked for this provider.",
-          providerName: providerUser.username,
+          providerName: provider.displayName || provider.username,
           conflict: first ? { start: first.start, end: first.end } : null,
         });
       }
 
-      const calendar = google.calendar({ version: "v3", auth: oauth2 });
       const { data } = await calendar.events.insert({
-        calendarId: providerUser.calendarId,
+        calendarId: provider.calendarId,
         requestBody: {
           summary,
           description,
@@ -154,7 +270,7 @@ router.post(
 
       res.json({
         ok: true,
-        providerId: String(providerUser._id),
+        providerId: String(provider._id),
         eventId: data.id,
         htmlLink: data.htmlLink,
       });
@@ -164,12 +280,12 @@ router.post(
   }
 );
 
-// Agenda for a single day
+// Agenda (single day)
 router.get(
   "/api/gcal/agenda",
-  requireGoogle,
   verifyToken,
   requireRole("admin", "reception", "provider"),
+  requireClinicOAuth,
   async (req, res) => {
     try {
       let { day, providerId } = req.query;
@@ -179,26 +295,24 @@ router.get(
       else if (!providerId)
         return res.status(400).json({ error: "providerId is required" });
 
-      const providerUser = await User.findOne({
+      const provider = await User.findOne({
         _id: providerId,
         role: "provider",
         active: true,
       });
-      if (!providerUser || !providerUser.calendarId) {
+      if (!provider)
         return res
           .status(404)
-          .json({ error: "Provider user not found/invalid calendarId" });
-      }
+          .json({ error: "Provider user not found/invalid" });
+
+      await ensureClinicOwnedCalendar(req.oauth, provider);
 
       const start = new Date(`${day}T00:00:00Z`).toISOString();
       const end = new Date(`${day}T23:59:59Z`).toISOString();
 
-      const oauth2 = makeOAuth();
-      oauth2.setCredentials(req.session.tokens);
-      const calendar = google.calendar({ version: "v3", auth: oauth2 });
-
+      const calendar = google.calendar({ version: "v3", auth: req.oauth });
       const { data } = await calendar.events.list({
-        calendarId: providerUser.calendarId,
+        calendarId: provider.calendarId,
         singleEvents: true,
         orderBy: "startTime",
         timeMin: start,
@@ -215,39 +329,36 @@ router.get(
 // Range
 router.get(
   "/api/gcal/events-range",
-  requireGoogle,
   verifyToken,
   requireRole("admin", "reception", "provider"),
+  requireClinicOAuth,
   async (req, res) => {
     try {
       let { timeMin, timeMax, providerId } = req.query;
-      if (!timeMin || !timeMax) {
+      if (!timeMin || !timeMax)
         return res
           .status(400)
           .json({ error: "timeMin and timeMax are required" });
-      }
 
       if (req.user.role === "provider") providerId = req.user._id;
       else if (!providerId)
         return res.status(400).json({ error: "providerId is required" });
 
-      const providerUser = await User.findOne({
+      const provider = await User.findOne({
         _id: providerId,
         role: "provider",
         active: true,
       });
-      if (!providerUser || !providerUser.calendarId) {
+      if (!provider)
         return res
           .status(404)
-          .json({ error: "Provider user not found/invalid calendarId" });
-      }
+          .json({ error: "Provider user not found/invalid" });
 
-      const oauth2 = makeOAuth();
-      oauth2.setCredentials(req.session.tokens);
-      const calendar = google.calendar({ version: "v3", auth: oauth2 });
+      await ensureClinicOwnedCalendar(req.oauth, provider);
 
+      const calendar = google.calendar({ version: "v3", auth: req.oauth });
       const { data } = await calendar.events.list({
-        calendarId: providerUser.calendarId,
+        calendarId: provider.calendarId,
         singleEvents: true,
         orderBy: "startTime",
         timeMin,
@@ -264,9 +375,9 @@ router.get(
 // Delete
 router.delete(
   "/api/gcal/events/:eventId",
-  requireGoogle,
   verifyToken,
   requireRole("admin", "reception", "provider"),
+  requireClinicOAuth,
   async (req, res) => {
     try {
       const { eventId } = req.params;
@@ -276,29 +387,27 @@ router.delete(
       else if (!providerId)
         return res.status(400).json({ error: "providerId is required" });
 
-      const providerUser = await User.findOne({
+      const provider = await User.findOne({
         _id: providerId,
         role: "provider",
         active: true,
       });
-      if (!providerUser || !providerUser.calendarId) {
+      if (!provider)
         return res
           .status(404)
-          .json({ error: "Provider user not found/invalid calendarId" });
-      }
+          .json({ error: "Provider user not found/invalid" });
 
-      const oauth2 = makeOAuth();
-      oauth2.setCredentials(req.session.tokens);
-      const calendar = google.calendar({ version: "v3", auth: oauth2 });
+      await ensureClinicOwnedCalendar(req.oauth, provider);
 
+      const calendar = google.calendar({ version: "v3", auth: req.oauth });
       await calendar.events.delete({
-        calendarId: providerUser.calendarId,
+        calendarId: provider.calendarId,
         eventId,
       });
 
       res.json({
         ok: true,
-        providerId: String(providerUser._id),
+        providerId: String(provider._id),
         deletedEventId: eventId,
       });
     } catch (err) {
@@ -307,12 +416,12 @@ router.delete(
   }
 );
 
-// Patch (partial update)
+// Patch
 router.patch(
   "/api/gcal/events/:eventId",
-  requireGoogle,
   verifyToken,
   requireRole("admin", "reception", "provider"),
+  requireClinicOAuth,
   async (req, res) => {
     try {
       const { eventId } = req.params;
@@ -325,42 +434,43 @@ router.patch(
         return res.status(400).json({ error: "providerId is required" });
 
       if ((startISO && !endISO) || (!startISO && endISO)) {
-        return res
-          .status(400)
-          .json({
-            error: "Provide both startISO and endISO when changing times",
-          });
+        return res.status(400).json({
+          error: "Provide both startISO and endISO when changing times",
+        });
       }
       if (startISO && endISO && new Date(startISO) >= new Date(endISO)) {
         return res.status(400).json({ error: "endISO must be after startISO" });
       }
 
-      const providerUser = await User.findOne({
+      const provider = await User.findOne({
         _id: providerId,
         role: "provider",
         active: true,
       });
-      if (!providerUser || !providerUser.calendarId) {
+      if (!provider)
         return res
           .status(404)
-          .json({ error: "Provider user not found/invalid calendarId" });
-      }
+          .json({ error: "Provider user not found/invalid" });
 
-      const oauth2 = makeOAuth();
-      oauth2.setCredentials(req.session.tokens);
+      await ensureClinicOwnedCalendar(req.oauth, provider);
+
+      const calendar = google.calendar({ version: "v3", auth: req.oauth });
 
       if (startISO && endISO) {
-        const { free, busy } = await getFreeBusy(oauth2, {
-          calendarId: providerUser.calendarId,
-          startISO,
-          endISO,
+        const { data: fb } = await calendar.freebusy.query({
+          requestBody: {
+            timeMin: startISO,
+            timeMax: endISO,
+            items: [{ id: provider.calendarId }],
+          },
         });
-        if (!free) {
-          const first = busy[0] || null;
+        const busy = fb?.calendars?.[provider.calendarId]?.busy || [];
+        if (busy.length) {
+          const first = busy[0];
           return res.status(409).json({
             ok: false,
             error: "Time range is already booked for this provider.",
-            providerName: providerUser.username,
+            providerName: provider.displayName || provider.username,
             conflict: first ? { start: first.start, end: first.end } : null,
           });
         }
@@ -377,16 +487,15 @@ router.patch(
         requestBody.attendees = attendeeEmails.map((email) => ({ email }));
       }
 
-      const calendar = google.calendar({ version: "v3", auth: oauth2 });
       const { data } = await calendar.events.patch({
-        calendarId: providerUser.calendarId,
+        calendarId: provider.calendarId,
         eventId,
         requestBody,
       });
 
       res.json({
         ok: true,
-        providerId: String(providerUser._id),
+        providerId: String(provider._id),
         eventId: data.id,
         htmlLink: data.htmlLink,
         updatedFields: Object.keys(requestBody),

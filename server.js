@@ -33,7 +33,7 @@ app.use(
     sameSite: "lax",
   })
 );
-app.use(morgan("dev"));
+app.use(morgan("tiny"));
 
 // --- Health check ---
 app.get("/healthz", (req, res) => res.json({ ok: true }));
@@ -47,7 +47,7 @@ app.use(gcalRouter); // <-- mounts /oauth/google and /api/gcal/*
 // --- Error handler ---
 app.use((err, req, res, next) => {
   console.error(err);
-  res.status(500).json({ error: String(err.message || err) });
+  res.status(500).json({ err: String(err.message || err) });
 });
 
 app.listen(PORT, () => {
