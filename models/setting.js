@@ -8,7 +8,6 @@ const settingSchema = new mongoose.Schema(
   { timestamps: true }
 );
 
-// Helper to get/set a single app-level doc
 settingSchema.statics.get = async function (key) {
   const doc = await this.findOne({ key });
   return doc?.value ?? null;

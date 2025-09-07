@@ -5,7 +5,6 @@ const requireRole = require("../middleware/require-role");
 
 const router = express.Router();
 
-// CREATE user (admin only)
 router.post("/", verifyToken, requireRole("admin"), async (req, res) => {
   try {
     const {
@@ -27,8 +26,6 @@ router.post("/", verifyToken, requireRole("admin"), async (req, res) => {
     const bcrypt = require("bcrypt");
     const saltRounds = 12;
 
-    // IMPORTANT: never default provider calendarId to their email.
-    // Leave null so ensure-calendar will create a clinic-owned calendar.
     const effectiveCalendarId = calendarId || null;
 
     const user = await User.create({
@@ -46,7 +43,6 @@ router.post("/", verifyToken, requireRole("admin"), async (req, res) => {
   }
 });
 
-// UPDATE user (admin only) – partial
 router.patch(
   "/:userId",
   verifyToken,
@@ -64,7 +60,7 @@ router.patch(
         update.role = role;
       }
       if (displayName !== undefined) update.displayName = displayName;
-      if (calendarId !== undefined) update.calendarId = calendarId; // allow null to clear
+      if (calendarId !== undefined) update.calendarId = calendarId;
       if (active !== undefined) update.active = !!active;
       if (password) {
         const bcrypt = require("bcrypt");
@@ -82,7 +78,6 @@ router.patch(
   }
 );
 
-// GET all users (admin and reception only)
 router.get(
   "/",
   verifyToken,
@@ -97,7 +92,6 @@ router.get(
   }
 );
 
-// Providers list for UI
 router.get(
   "/providers",
   verifyToken,
@@ -115,7 +109,6 @@ router.get(
   }
 );
 
-// Self details
 router.get("/:userId", verifyToken, async (req, res) => {
   try {
     if (req.user._id !== req.params.userId) {

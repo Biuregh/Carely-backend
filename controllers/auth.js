@@ -6,7 +6,6 @@ const User = require("../models/user");
 const router = express.Router();
 const saltRounds = 12;
 
-// PUBLIC sign-up -> always patient
 router.post("/sign-up", async (req, res) => {
   try {
     const { username, password } = req.body;
@@ -29,7 +28,6 @@ router.post("/sign-up", async (req, res) => {
   }
 });
 
-// Sign-in (unchanged)
 router.post("/sign-in", async (req, res) => {
   try {
     const user = await User.findOne({ username: req.body.username });
@@ -46,7 +44,6 @@ router.post("/sign-in", async (req, res) => {
   }
 });
 
-// one-time bootstrap admin (to be able to create other users and assign roles)
 router.post("/bootstrap-admin", async (req, res) => {
   try {
     const existingAdmin = await User.findOne({ role: "admin" });

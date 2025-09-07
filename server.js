@@ -8,14 +8,12 @@ const mongoose = require("mongoose");
 const cookieSession = require("cookie-session");
 const PORT = process.env.PORT || 3000;
 
-// Routers
 const authRouter = require("./controllers/auth");
 const testJwtRouter = require("./controllers/test-jwt");
 const usersRouter = require("./controllers/users");
-const gcalRouter = require("./controllers/gcal");
-const googleRouter = require("./controllers/google");
+const gcalRoutes = require("./routes/gcal.routes");
+const googleRoutes = require("./routes/google.routes");
 
-// --- DB ---
 mongoose.connect(process.env.MONGODB_URI);
 mongoose.connection.on("connected", () => {
   console.log(`Connected to MongoDB ${mongoose.connection.name}.`);
@@ -23,7 +21,6 @@ mongoose.connection.on("connected", () => {
 
 const app = express();
 
-// --- Middlewares ---
 app.use(cors({ origin: "http://localhost:5173", credentials: true }));
 app.use(express.json());
 app.use(
@@ -36,17 +33,14 @@ app.use(
 );
 app.use(morgan("tiny"));
 
-// --- Health check ---
 app.get("/healthz", (req, res) => res.json({ ok: true }));
 
-// --- App routers ---
 app.use("/auth", authRouter);
 app.use("/test-jwt", testJwtRouter);
 app.use("/users", usersRouter);
-app.use(gcalRouter); // <-- mounts /gcal/*
-app.use(googleRouter); // <-- mounts /oauth/google/app/*
+app.use(gcalRoutes);
+app.use(googleRoutes);
 
-// --- Error handler ---
 app.use((err, req, res, next) => {
   console.error(err);
   res.status(500).json({ err: String(err.message || err) });

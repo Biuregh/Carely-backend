@@ -1,10 +1,7 @@
 "use strict";
 
-const express = require("express");
 const { google } = require("googleapis");
 const mongoose = require("mongoose");
-
-const router = express.Router();
 
 function isNonEmptyString(v) {
   return typeof v === "string" && v.trim().length > 0;
@@ -14,9 +11,7 @@ function hasOffsetOrZ(dt) {
 }
 function buildDateField(part, fallbackTZ = "America/New_York") {
   if (!part || typeof part !== "object") return null;
-  if (isNonEmptyString(part.date)) {
-    return { date: String(part.date).trim() };
-  }
+  if (isNonEmptyString(part.date)) return { date: String(part.date).trim() };
   const dt = String(part.dateTime || "").trim();
   if (!isNonEmptyString(dt)) return null;
   if (hasOffsetOrZ(dt)) return { dateTime: dt };
@@ -25,32 +20,24 @@ function buildDateField(part, fallbackTZ = "America/New_York") {
     : fallbackTZ;
   return { dateTime: dt, timeZone: tz };
 }
-
 function getOAuthClient(req) {
-  const {
-    GCAL_CLIENT_ID = "",
-    GCAL_CLIENT_SECRET = "",
-    GCAL_REDIRECT_URI = "",
-  } = process.env;
-  const oAuth2Client = new google.auth.OAuth2(
-    GCAL_CLIENT_ID,
-    GCAL_CLIENT_SECRET,
-    GCAL_REDIRECT_URI
+  const oAuth2 = new google.auth.OAuth2(
+    process.env.GCAL_CLIENT_ID,
+    process.env.GCAL_CLIENT_SECRET,
+    process.env.GCAL_REDIRECT_URI
   );
-  const tokens = req?.session?.tokens;
-  if (tokens) oAuth2Client.setCredentials(tokens);
-  return oAuth2Client;
+  if (req?.session?.tokens) oAuth2.setCredentials(req.session.tokens);
+  return oAuth2;
 }
-function requireGoogle(req, res, next) {
-  if (!req?.session || !req.session.tokens) {
-    return res.status(401).json({ err: "Not connected to Google." });
+function getUserModel() {
+  try {
+    return mongoose.model("User");
+  } catch {
+    return require("../user.js");
   }
-  next();
 }
 
-router.get("/api/gcal/health", (_req, res) => res.json({ ok: true }));
-
-router.post("/api/gcal/events", requireGoogle, async (req, res) => {
+async function createEvent(req, res) {
   try {
     const body = req?.body ?? {};
     const {
@@ -63,24 +50,17 @@ router.post("/api/gcal/events", requireGoogle, async (req, res) => {
       start,
       end,
     } = body;
-
     if (!isNonEmptyString(summary))
       return res.status(400).json({ err: "summary is required" });
 
     const startField = buildDateField(start);
     const endField = buildDateField(end, startField?.timeZone);
-    if (!startField || !endField) {
+    if (!startField || !endField)
       return res.status(400).json({ err: "Invalid start/end" });
-    }
 
     let targetCalendarId = "primary";
     if (isNonEmptyString(providerId)) {
-      let User;
-      try {
-        User = mongoose.model("User");
-      } catch {
-        User = require("../models/user");
-      }
+      const User = getUserModel();
       const provider = await User.findById(providerId).lean();
       if (!provider) return res.status(404).json({ err: "Provider not found" });
       if (!provider.calendarId)
@@ -92,7 +72,6 @@ router.post("/api/gcal/events", requireGoogle, async (req, res) => {
 
     const auth = getOAuthClient(req);
     const calendar = google.calendar({ version: "v3", auth });
-
     const event = {
       summary,
       description,
@@ -101,30 +80,23 @@ router.post("/api/gcal/events", requireGoogle, async (req, res) => {
       end: endField,
       attendees: Array.isArray(attendees) ? attendees : [],
     };
-
     const { data } = await calendar.events.insert({
       calendarId: targetCalendarId,
       requestBody: event,
     });
-
     res.status(201).json({ ...data, _usedCalendarId: targetCalendarId });
   } catch (err) {
     res.status(500).json({ err: err?.message || "Unknown error" });
   }
-});
+}
 
-router.get("/api/gcal/agenda", requireGoogle, async (req, res) => {
+async function agenda(req, res) {
   try {
     const { providerId } = req.query;
     if (!isNonEmptyString(providerId))
       return res.status(400).json({ err: "providerId required" });
 
-    let User;
-    try {
-      User = mongoose.model("User");
-    } catch {
-      User = require("../models/user");
-    }
+    const User = getUserModel();
     const provider = await User.findById(providerId).lean();
     if (!provider) return res.status(404).json({ err: "Provider not found" });
     if (!provider.calendarId)
@@ -151,7 +123,6 @@ router.get("/api/gcal/agenda", requireGoogle, async (req, res) => {
 
     const auth = getOAuthClient(req);
     const calendar = google.calendar({ version: "v3", auth });
-
     const params = {
       calendarId,
       singleEvents: true,
@@ -167,9 +138,9 @@ router.get("/api/gcal/agenda", requireGoogle, async (req, res) => {
   } catch (err) {
     res.status(500).json({ err: err?.message || "Unknown error" });
   }
-});
+}
 
-router.get("/api/gcal/events-range", requireGoogle, async (req, res) => {
+async function eventsRange(req, res) {
   try {
     const { providerId, timeMin, timeMax, maxResults = 250 } = req.query;
     if (!isNonEmptyString(providerId))
@@ -177,12 +148,7 @@ router.get("/api/gcal/events-range", requireGoogle, async (req, res) => {
     if (!isNonEmptyString(timeMin) || !isNonEmptyString(timeMax))
       return res.status(400).json({ err: "timeMin and timeMax are required" });
 
-    let User;
-    try {
-      User = mongoose.model("User");
-    } catch {
-      User = require("../models/user");
-    }
+    const User = getUserModel();
     const provider = await User.findById(providerId).lean();
     if (!provider) return res.status(404).json({ err: "Provider not found" });
     if (!provider.calendarId)
@@ -191,7 +157,6 @@ router.get("/api/gcal/events-range", requireGoogle, async (req, res) => {
 
     const auth = getOAuthClient(req);
     const calendar = google.calendar({ version: "v3", auth });
-
     const { data } = await calendar.events.list({
       calendarId,
       timeMin,
@@ -200,14 +165,13 @@ router.get("/api/gcal/events-range", requireGoogle, async (req, res) => {
       orderBy: "startTime",
       maxResults: Number(maxResults) || 250,
     });
-
     res.json({ ...data, _usedCalendarId: calendarId });
   } catch (err) {
     res.status(500).json({ err: err?.message || "Unknown error" });
   }
-});
+}
 
-router.patch("/api/gcal/events/:eventId", requireGoogle, async (req, res) => {
+async function updateEvent(req, res) {
   try {
     const { eventId } = req.params;
     if (!isNonEmptyString(eventId))
@@ -217,12 +181,7 @@ router.patch("/api/gcal/events/:eventId", requireGoogle, async (req, res) => {
     if (!isNonEmptyString(providerId))
       return res.status(400).json({ err: "providerId required" });
 
-    let User;
-    try {
-      User = mongoose.model("User");
-    } catch {
-      User = require("../models/user");
-    }
+    const User = getUserModel();
     const provider = await User.findById(providerId).lean();
     if (!provider) return res.status(404).json({ err: "Provider not found" });
     if (!provider.calendarId)
@@ -249,20 +208,18 @@ router.patch("/api/gcal/events/:eventId", requireGoogle, async (req, res) => {
 
     const auth = getOAuthClient(req);
     const calendar = google.calendar({ version: "v3", auth });
-
     const { data } = await calendar.events.patch({
       calendarId,
       eventId,
       requestBody: updates,
     });
-
     res.json({ ...data, _usedCalendarId: calendarId });
   } catch (err) {
     res.status(500).json({ err: err?.message || "Unknown error" });
   }
-});
+}
 
-router.delete("/api/gcal/events/:eventId", requireGoogle, async (req, res) => {
+async function deleteEvent(req, res) {
   try {
     const { eventId } = req.params;
     if (!isNonEmptyString(eventId))
@@ -272,12 +229,7 @@ router.delete("/api/gcal/events/:eventId", requireGoogle, async (req, res) => {
     if (!isNonEmptyString(providerId))
       return res.status(400).json({ err: "providerId required" });
 
-    let User;
-    try {
-      User = mongoose.model("User");
-    } catch {
-      User = require("../models/user");
-    }
+    const User = getUserModel();
     const provider = await User.findById(providerId).lean();
     if (!provider) return res.status(404).json({ err: "Provider not found" });
     if (!provider.calendarId)
@@ -286,13 +238,63 @@ router.delete("/api/gcal/events/:eventId", requireGoogle, async (req, res) => {
 
     const auth = getOAuthClient(req);
     const calendar = google.calendar({ version: "v3", auth });
-
     await calendar.events.delete({ calendarId, eventId });
-
     res.json({ ok: true, _usedCalendarId: calendarId });
   } catch (err) {
     res.status(500).json({ err: err?.message || "Unknown error" });
   }
-});
+}
 
-module.exports = router;
+async function ensureProviderCalendar(req, res) {
+  try {
+    const providerId = req.params.id;
+    const User = getUserModel();
+    const provider = await User.findById(providerId);
+    if (!provider) return res.status(404).json({ err: "Provider not found" });
+    if (provider.role !== "provider")
+      return res.status(400).json({ err: "User is not a provider" });
+    if (provider.calendarId)
+      return res.json({ calendarId: provider.calendarId });
+
+    const auth = getOAuthClient(req);
+    const calendar = google.calendar({ version: "v3", auth });
+    const summary =
+      provider.displayName || provider.username || "Clinic Provider";
+    const { data } = await calendar.calendars.insert({
+      requestBody: {
+        summary,
+        timeZone: process.env.GCAL_DEFAULT_TZ || "America/New_York",
+      },
+    });
+
+    provider.calendarId = data.id;
+    await provider.save();
+
+    try {
+      if (provider.username && provider.username.includes("@")) {
+        await calendar.acl.insert({
+          calendarId: data.id,
+          requestBody: {
+            role: "reader",
+            scope: { type: "user", value: provider.username },
+          },
+        });
+      }
+    } catch (_) {}
+
+    res.json({ calendarId: data.id });
+  } catch (e) {
+    res
+      .status(500)
+      .json({ error: e.message || "Failed to ensure provider calendar" });
+  }
+}
+
+module.exports = {
+  createEvent,
+  agenda,
+  eventsRange,
+  updateEvent,
+  deleteEvent,
+  ensureProviderCalendar,
+};
