@@ -12,7 +12,8 @@ const PORT = process.env.PORT || 3000;
 const authRouter = require("./controllers/auth");
 const testJwtRouter = require("./controllers/test-jwt");
 const usersRouter = require("./controllers/users");
-const gcalRouter = require("./controllers/gcal"); // <-- NEW
+const gcalRouter = require("./controllers/gcal");
+const googleRouter = require("./controllers/google");
 
 // --- DB ---
 mongoose.connect(process.env.MONGODB_URI);
@@ -42,7 +43,8 @@ app.get("/healthz", (req, res) => res.json({ ok: true }));
 app.use("/auth", authRouter);
 app.use("/test-jwt", testJwtRouter);
 app.use("/users", usersRouter);
-app.use(gcalRouter); // <-- mounts /oauth/google and /api/gcal/*
+app.use(gcalRouter); // <-- mounts /gcal/*
+app.use(googleRouter); // <-- mounts /oauth/google/app/*
 
 // --- Error handler ---
 app.use((err, req, res, next) => {
