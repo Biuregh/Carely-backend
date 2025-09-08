@@ -1,5 +1,4 @@
 import mongoose, { Schema, model } from "mongoose";
-import patients from './patient.js';
 
 const appointmentSchema = new mongoose.Schema({
     patientName: {
@@ -9,9 +8,8 @@ const appointmentSchema = new mongoose.Schema({
     date: { type: String, required: true },
     startTime: { type: String, required: true },
     endTime:{type:String,required:true},
-    doctor: { type:String, required: true },
-    //doctor: { type: mongoose.Schema.Types.ObjectId, ref:'User',
-        //required: true },
+    provider: { type: mongoose.Schema.Types.ObjectId, ref:'User',
+        required: true },
     status: {
         type: String,
         enum: ['scheduled', 'checkedIn', 'completed'],
@@ -20,8 +18,13 @@ const appointmentSchema = new mongoose.Schema({
     reason:{type: String, required: true},
     patientInfo:[{
             type: mongoose.Schema.Types.ObjectId,
-            ref: 'patients'}]
+            ref: 'patients'}],
+
+    createdBy:{ type: mongoose.Schema.Types.ObjectId, ref:'User',
+        required: true },
     });
+
+  
 
 
 export default model('Appointments', appointmentSchema);
