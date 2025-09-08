@@ -13,6 +13,7 @@ const testJwtRouter = require("./controllers/test-jwt");
 const usersRouter = require("./controllers/users");
 const gcalRoutes = require("./routes/gcal.routes");
 const googleRoutes = require("./routes/google.routes");
+const appointmentRoutes = require("./routes/appointment.routes");
 
 mongoose.connect(process.env.MONGODB_URI);
 mongoose.connection.on("connected", () => {
@@ -40,6 +41,7 @@ app.use("/test-jwt", testJwtRouter);
 app.use("/users", usersRouter);
 app.use(gcalRoutes);
 app.use(googleRoutes);
+app.use(appointmentRoutes);
 
 app.use((err, req, res, next) => {
   console.error(err);
