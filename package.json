@@ -1,15 +1,13 @@
 {
-"name": "carely-backend",
+  "name": "carely-backend",
   "version": "1.0.0",
-  "description": "<!-- # React + Vite",
-  "main": "index.js",
+  "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "dev": "nodemon server.js",
+    "start": "node server.js",
+    "health": "curl -i http://localhost:3000/healthz || true"
   },
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-"dependencies": {
+  "dependencies": {
     "bcrypt": "^6.0.0",
     "cookie-session": "^2.1.1",
     "cors": "^2.8.5",

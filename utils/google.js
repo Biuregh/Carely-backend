@@ -1,6 +1,5 @@
 const { google } = require("googleapis");
 
-// OAuth2 client from env
 function makeOAuth() {
   return new google.auth.OAuth2(
     process.env.GCAL_CLIENT_ID,
@@ -9,15 +8,13 @@ function makeOAuth() {
   );
 }
 
-// Require Google cookie-session tokens
 function requireGoogle(req, res, next) {
   if (!req.session || !req.session.tokens) {
-    return res.status(401).json({ error: "Not connected to Google" });
+    return res.status(401).json({ err: "Not connected to Google" });
   }
   next();
 }
 
-// Free/busy helper
 async function getFreeBusy(oauth2, { calendarId, startISO, endISO }) {
   const calendar = google.calendar({ version: "v3", auth: oauth2 });
   const { data } = await calendar.freebusy.query({
