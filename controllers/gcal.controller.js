@@ -3,9 +3,10 @@
 const { google } = require("googleapis");
 const mongoose = require("mongoose");
 
-function isNonEmptyString(v) {
-  return typeof v === "string" && v.trim().length > 0;
-}
+const isNonEmptyString = (v) => typeof v === "string" && v.trim().length > 0;
+const isValidId = (v) =>
+  typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
+
 function hasOffsetOrZ(dt) {
   return /(?:Z|[+\-]\d{2}:\d{2})$/.test(dt);
 }
@@ -37,11 +38,12 @@ function getUserModel() {
   }
 }
 
+/* ------------------------------ Create ------------------------------ */
 async function createEvent(req, res) {
   try {
     const body = req?.body ?? {};
     const {
-      providerId,
+      providerId, // may be "ALL" from UI; treat as invalid
       calendarId,
       summary = "",
       description = "",
@@ -59,7 +61,8 @@ async function createEvent(req, res) {
       return res.status(400).json({ err: "Invalid start/end" });
 
     let targetCalendarId = "primary";
-    if (isNonEmptyString(providerId)) {
+
+    if (isValidId(providerId)) {
       const User = getUserModel();
       const provider = await User.findById(providerId).lean();
       if (!provider) return res.status(404).json({ err: "Provider not found" });
@@ -67,6 +70,7 @@ async function createEvent(req, res) {
         return res.status(400).json({ err: "Provider is missing calendarId" });
       targetCalendarId = String(provider.calendarId).trim();
     } else if (isNonEmptyString(calendarId)) {
+      // if providerId is "ALL" or invalid, fall back to explicit calendarId or "primary"
       targetCalendarId = String(calendarId).trim();
     }
 
@@ -90,11 +94,12 @@ async function createEvent(req, res) {
   }
 }
 
+/* ----------------------------- Agenda/Ranges ----------------------------- */
 async function agenda(req, res) {
   try {
     const { providerId } = req.query;
-    if (!isNonEmptyString(providerId))
-      return res.status(400).json({ err: "providerId required" });
+    if (!isValidId(providerId))
+      return res.status(400).json({ err: "Invalid providerId" });
 
     const User = getUserModel();
     const provider = await User.findById(providerId).lean();
@@ -143,10 +148,11 @@ async function agenda(req, res) {
 async function eventsRange(req, res) {
   try {
     const { providerId, timeMin, timeMax, maxResults = 250 } = req.query;
-    if (!isNonEmptyString(providerId))
-      return res.status(400).json({ err: "providerId required" });
-    if (!isNonEmptyString(timeMin) || !isNonEmptyString(timeMax))
+    if (!isValidId(providerId))
+      return res.status(400).json({ err: "Invalid providerId" });
+    if (!isNonEmptyString(timeMin) || !isNonEmptyString(timeMax)) {
       return res.status(400).json({ err: "timeMin and timeMax are required" });
+    }
 
     const User = getUserModel();
     const provider = await User.findById(providerId).lean();
@@ -171,6 +177,7 @@ async function eventsRange(req, res) {
   }
 }
 
+/* --------------------------- Update / Delete --------------------------- */
 async function updateEvent(req, res) {
   try {
     const { eventId } = req.params;
@@ -178,8 +185,8 @@ async function updateEvent(req, res) {
       return res.status(400).json({ err: "eventId required" });
 
     const providerId = req.query.providerId || req.body?.providerId;
-    if (!isNonEmptyString(providerId))
-      return res.status(400).json({ err: "providerId required" });
+    if (!isValidId(providerId))
+      return res.status(400).json({ err: "Invalid providerId" });
 
     const User = getUserModel();
     const provider = await User.findById(providerId).lean();
@@ -226,8 +233,8 @@ async function deleteEvent(req, res) {
       return res.status(400).json({ err: "eventId required" });
 
     const { providerId } = req.query;
-    if (!isNonEmptyString(providerId))
-      return res.status(400).json({ err: "providerId required" });
+    if (!isValidId(providerId))
+      return res.status(400).json({ err: "Invalid providerId" });
 
     const User = getUserModel();
     const provider = await User.findById(providerId).lean();
@@ -248,6 +255,9 @@ async function deleteEvent(req, res) {
 async function ensureProviderCalendar(req, res) {
   try {
     const providerId = req.params.id;
+    if (!isValidId(providerId))
+      return res.status(400).json({ err: "Invalid providerId" });
+
     const User = getUserModel();
     const provider = await User.findById(providerId);
     if (!provider) return res.status(404).json({ err: "Provider not found" });

@@ -8,14 +8,13 @@ const mongoose = require("mongoose");
 const cookieSession = require("cookie-session");
 const PORT = process.env.PORT || 3000;
 
-
 const authRouter = require("./controllers/auth");
 const testJwtRouter = require("./controllers/test-jwt");
 const usersRouter = require("./controllers/users");
 const gcalRoutes = require("./routes/gcal.routes");
 const googleRoutes = require("./routes/google.routes");
 const appointmentRoutes = require("./routes/appointment.routes");
-const patientsRouter = require("./routes/patientRoutes")
+const patientsRouter = require("./routes/patientRoutes");
 
 mongoose.connect(process.env.MONGODB_URI);
 mongoose.connection.on("connected", () => {
@@ -39,8 +38,9 @@ app.use(morgan("dev"));
 app.get("/healthz", (req, res) => res.json({ ok: true }));
 
 app.use("/auth", authRouter);
-app.use("/test-jwt", testJwtRouter); 
+app.use("/test-jwt", testJwtRouter);
 app.use("/users", usersRouter);
+app.use("/patients", patientsRouter);
 app.use(gcalRoutes);
 app.use(googleRoutes);
 app.use(appointmentRoutes);

@@ -1,5 +1,15 @@
 "use strict";
 
+/**
+ * Appointments Controller (CJS)
+ * - Lists appointments (with provider/patient names)
+ * - Creates an appointment (Mongo + Google Calendar)
+ * - Patches an appointment (reschedule / status / reason) and syncs Google
+ *
+ * Status enum (models/appointment.js):
+ *   ["Scheduled","Confirmed","CheckIn","Completed","Cancelled"]
+ */
+
 const mongoose = require("mongoose");
 const { google } = require("googleapis");
 const { getOAuthClient } = require("./google.controller.js");
@@ -8,20 +18,29 @@ function AModel() {
   try {
     return mongoose.model("Appointment");
   } catch {
-    return require("../appointment.js");
+    return require("../models/appointment.js");
   }
 }
 function UModel() {
   try {
     return mongoose.model("User");
   } catch {
-    return require("../user.js");
+    return require("../models/user.js");
+  }
+}
+function PModel() {
+  try {
+    return mongoose.model("Patient");
+  } catch {
+    return require("../models/patient.js");
   }
 }
 
-function pad(n) {
-  return String(n).padStart(2, "0");
-}
+const TZ = process.env.GCAL_DEFAULT_TZ || "America/New_York";
+const pad = (n) => String(n).padStart(2, "0");
+const isValidId = (v) =>
+  typeof v === "string" && mongoose.Types.ObjectId.isValid(v);
+
 function toLocalRFC3339NoZ(d) {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(
     d.getHours()
@@ -37,43 +56,74 @@ function fromISOtoLocalParts(iso) {
 function buildISO(dateStr, timeStr) {
   return new Date(`${dateStr}T${timeStr}:00`).toISOString();
 }
-const toMins = (t) => { // NEW helper
+const toMins = (t) => {
   const [h, m] = String(t).split(":").map(Number);
   return h * 60 + m;
 };
 
-function map(doc, provUser, patUser) {
+function map(doc, provUser, pat) {
   const startISO = buildISO(doc.date, doc.startTime);
   const endISO = buildISO(doc.date, doc.endTime);
   return {
     id: String(doc._id),
     code: doc.code || "",
     status: doc.status,
-    patient: {
-      name: patUser?.displayName || patUser?.username || "",
-      email: "",
-    },
-    provider: { name: provUser?.displayName || provUser?.username || "" },
+    reason: doc.reason || "",
     providerId: doc.providerId ? String(doc.providerId) : "",
     googleEventId: doc.googleEventId || "",
-    reason: doc.reason || "",
+    patient: {
+      name: pat?.name || pat?.displayName || pat?.username || "",
+      email: pat?.email || "",
+    },
+    provider: {
+      name: (provUser?.displayName || provUser?.username || "").trim(),
+    },
     startISO,
     endISO,
   };
 }
 
+function normalizeStatus(raw) {
+  if (typeof raw !== "string") return null;
+  const t = raw.trim().toLowerCase();
+  const mapTable = {
+    scheduled: "Scheduled",
+    confirm: "Confirmed",
+    confirmed: "Confirmed",
+    "check in": "CheckIn",
+    checkin: "CheckIn",
+    "check-in": "CheckIn",
+    completed: "Completed",
+    done: "Completed",
+    cancelled: "Cancelled",
+    canceled: "Cancelled",
+    cancel: "Cancelled",
+  };
+  return mapTable[t] || null;
+}
+
+/* --------------------------------- List -------------------------------- */
 async function list(req, res) {
   try {
     const A = AModel();
     const { by, term, providerId, timeMin, timeMax, limit = 200 } = req.query;
+
     const q = {};
-    if (providerId) q.providerId = providerId;
+    // only filter by provider if it's a valid ObjectId
+    if (isValidId(providerId)) q.providerId = providerId;
+
     if (timeMin || timeMax) {
       const minD = timeMin ? new Date(timeMin) : null;
       const maxD = timeMax ? new Date(timeMax) : null;
       const range = {};
-      if (minD) range.$gte = `${minD.getFullYear()}-${pad(minD.getMonth() + 1)}-${pad(minD.getDate())}`;
-      if (maxD) range.$lte = `${maxD.getFullYear()}-${pad(maxD.getMonth() + 1)}-${pad(maxD.getDate())}`;
+      if (minD)
+        range.$gte = `${minD.getFullYear()}-${pad(minD.getMonth() + 1)}-${pad(
+          minD.getDate()
+        )}`;
+      if (maxD)
+        range.$lte = `${maxD.getFullYear()}-${pad(maxD.getMonth() + 1)}-${pad(
+          maxD.getDate()
+        )}`;
       if (Object.keys(range).length) q.date = range;
     }
 
@@ -82,34 +132,55 @@ async function list(req, res) {
       .limit(Number(limit))
       .lean();
 
-    const userIds = new Set();
+    const providerIds = new Set();
+    const patientIds = new Set();
     docs.forEach((d) => {
-      if (d.providerId) userIds.add(String(d.providerId));
-      if (d.patientId) userIds.add(String(d.patientId));
+      if (d.providerId) providerIds.add(String(d.providerId));
+      if (d.patientId) patientIds.add(String(d.patientId));
     });
+
     const Users = UModel();
-    const users = await Users.find(
-      { _id: { $in: Array.from(userIds) } },
-      { displayName: 1, username: 1 }
-    ).lean();
-    const byId = new Map(users.map((u) => [String(u._id), u]));
+    const Patients = PModel();
+
+    const [providers, patients] = await Promise.all([
+      providerIds.size
+        ? Users.find(
+            { _id: { $in: Array.from(providerIds) } },
+            { displayName: 1, username: 1 }
+          ).lean()
+        : [],
+      patientIds.size
+        ? Patients.find(
+            { _id: { $in: Array.from(patientIds) } },
+            { name: 1, email: 1, phone: 1 }
+          ).lean()
+        : [],
+    ]);
+
+    const providerById = new Map(providers.map((u) => [String(u._id), u]));
+    const patientById = new Map(patients.map((p) => [String(p._id), p]));
 
     let items = docs.map((d) =>
-      map(d, byId.get(String(d.providerId)), byId.get(String(d.patientId)))
+      map(
+        d,
+        providerById.get(String(d.providerId)),
+        patientById.get(String(d.patientId))
+      )
     );
 
     if (by && term) {
       const t = String(term).trim().toLowerCase();
-      if (by === "patient")
+      if (by === "patient") {
         items = items.filter((i) =>
           (i.patient?.name || "").toLowerCase().includes(t)
         );
-      else if (by === "provider")
+      } else if (by === "provider") {
         items = items.filter((i) =>
           (i.provider?.name || "").toLowerCase().includes(t)
         );
-      else if (by === "id")
+      } else if (by === "id") {
         items = items.filter((i) => (i.code || "").toLowerCase().includes(t));
+      }
     }
 
     if (timeMin || timeMax) {
@@ -129,14 +200,18 @@ async function list(req, res) {
   }
 }
 
+/* -------------------------------- Create ------------------------------- */
 async function create(req, res) {
   try {
     const body = req.body || {};
     const { providerId, patientId, date, start, end, code, reason } = body;
-    if (!providerId)
-      return res.status(400).json({ err: "providerId required" });
-    if (!date || !start || !end)
+
+    if (!isValidId(providerId)) {
+      return res.status(400).json({ err: "Invalid providerId" });
+    }
+    if (!date || !start || !end) {
       return res.status(400).json({ err: "date/start/end required" });
+    }
 
     const Users = UModel();
     const provider = await Users.findById(providerId).lean();
@@ -145,10 +220,9 @@ async function create(req, res) {
       return res.status(400).json({ err: "Provider missing calendarId" });
 
     const A = AModel();
-    //no overlap for same date for this specific provider
-    const sNew = toMins(start); 
-    const eNew = toMins(end);   
-    const clash = await A.findOne({ 
+    const sNew = toMins(start);
+    const eNew = toMins(end);
+    const clash = await A.findOne({
       providerId,
       date,
       $expr: {
@@ -158,7 +232,11 @@ async function create(req, res) {
         ],
       },
     }).lean();
-    if (clash) return res.status(409).json({ err: "This provider already has an appointment that overlaps that time." });
+    if (clash) {
+      return res.status(409).json({
+        err: "This provider already has an appointment that overlaps that time.",
+      });
+    }
 
     const pre = await A.create({
       code: code || "",
@@ -166,26 +244,26 @@ async function create(req, res) {
       startTime: start,
       endTime: end,
       providerId,
-      patientId: patientId || null,
+      patientId: isValidId(patientId) ? patientId : null,
       reason: reason || "",
       createdById: req.user?._id || null,
-      status: "scheduled",
+      status: "Scheduled",
     });
 
     const auth = getOAuthClient(req);
     const calendar = google.calendar({ version: "v3", auth });
-    const tz = process.env.GCAL_DEFAULT_TZ || "America/New_York";
 
     let patientName = "";
-    if (patientId) {
-      const pat = await Users.findById(patientId, {
-        displayName: 1,
-        username: 1,
+    if (isValidId(patientId)) {
+      const Patients = PModel();
+      const pat = await Patients.findById(patientId, {
+        name: 1,
+        email: 1,
       }).lean();
-      patientName = pat?.displayName || pat?.username || "";
+      patientName = pat?.name || "";
     }
+    const summary = patientName || reason || "Appointment";
 
-    const summary = patientName ? `${patientName}` : "Appointment";
     const { data: gEvent } = await calendar.events.insert({
       calendarId: provider.calendarId,
       requestBody: {
@@ -193,11 +271,11 @@ async function create(req, res) {
         description: reason || "",
         start: {
           dateTime: toLocalRFC3339NoZ(new Date(`${date}T${start}:00`)),
-          timeZone: tz,
+          timeZone: TZ,
         },
         end: {
           dateTime: toLocalRFC3339NoZ(new Date(`${date}T${end}:00`)),
-          timeZone: tz,
+          timeZone: TZ,
         },
         extendedProperties: { private: { appointmentId: String(pre._id) } },
       },
@@ -208,7 +286,15 @@ async function create(req, res) {
     await pre.save();
 
     const provUser = provider;
-    const patUser = patientId ? await Users.findById(patientId).lean() : null;
+    let patUser = null;
+    if (isValidId(patientId)) {
+      const Patients = PModel();
+      patUser = await Patients.findById(patientId, {
+        name: 1,
+        email: 1,
+      }).lean();
+    }
+
     res
       .status(201)
       .json(map(pre.toObject ? pre.toObject() : pre, provUser, patUser));
@@ -217,29 +303,31 @@ async function create(req, res) {
   }
 }
 
+/* --------------------------------- Patch ------------------------------- */
 async function patch(req, res) {
   try {
     const { id } = req.params;
     const body = req.body || {};
     const A = AModel();
+
     const doc = await A.findById(id);
     if (!doc) return res.status(404).json({ err: "Not found" });
 
     const Users = UModel();
     const provider = await Users.findById(doc.providerId).lean();
-    if (!provider || !provider.calendarId)
+    if (!provider || !provider.calendarId) {
       return res.status(400).json({ err: "Provider calendar unavailable" });
+    }
 
     const auth = getOAuthClient(req);
     const calendar = google.calendar({ version: "v3", auth });
-    const tz = process.env.GCAL_DEFAULT_TZ || "America/New_York";
 
     const update = {};
 
     if (body.startISO && body.endISO) {
       const s = fromISOtoLocalParts(body.startISO);
       const e = fromISOtoLocalParts(body.endISO);
-      //conflict in reschedule
+
       const sNew = toMins(s.time);
       const eNew = toMins(e.time);
       const clash = await A.findOne({
@@ -253,7 +341,10 @@ async function patch(req, res) {
           ],
         },
       }).lean();
-      if (clash) return res.status(409).json({ err: "New time overlaps another appointment." });
+      if (clash)
+        return res
+          .status(409)
+          .json({ err: "New time overlaps another appointment." });
 
       await calendar.events.patch({
         calendarId: provider.calendarId,
@@ -261,11 +352,11 @@ async function patch(req, res) {
         requestBody: {
           start: {
             dateTime: toLocalRFC3339NoZ(new Date(`${s.date}T${s.time}:00`)),
-            timeZone: tz,
+            timeZone: TZ,
           },
           end: {
             dateTime: toLocalRFC3339NoZ(new Date(`${e.date}T${e.time}:00`)),
-            timeZone: tz,
+            timeZone: TZ,
           },
         },
       });
@@ -273,6 +364,24 @@ async function patch(req, res) {
       update.startTime = s.time;
       update.endTime = e.time;
     } else if (body.date && body.start && body.end) {
+      const sNew = toMins(body.start);
+      const eNew = toMins(body.end);
+      const clash = await A.findOne({
+        _id: { $ne: doc._id },
+        providerId: doc.providerId,
+        date: body.date,
+        $expr: {
+          $and: [
+            { $lt: [{ $toInt: { $substr: ["$startTime", 0, 2] } }, eNew / 60] },
+            { $gt: [{ $toInt: { $substr: ["$endTime", 0, 2] } }, sNew / 60] },
+          ],
+        },
+      }).lean();
+      if (clash)
+        return res
+          .status(409)
+          .json({ err: "New time overlaps another appointment." });
+
       await calendar.events.patch({
         calendarId: provider.calendarId,
         eventId: doc.googleEventId,
@@ -281,13 +390,13 @@ async function patch(req, res) {
             dateTime: toLocalRFC3339NoZ(
               new Date(`${body.date}T${body.start}:00`)
             ),
-            timeZone: tz,
+            timeZone: TZ,
           },
           end: {
             dateTime: toLocalRFC3339NoZ(
               new Date(`${body.date}T${body.end}:00`)
             ),
-            timeZone: tz,
+            timeZone: TZ,
           },
         },
       });
@@ -297,20 +406,29 @@ async function patch(req, res) {
     }
 
     if (typeof body.status === "string") {
-      update.status = body.status.toLowerCase();
-      if (body.status === "cancelled" && doc.googleEventId) {
-        await calendar.events.delete({
-          calendarId: provider.calendarId,
-          eventId: doc.googleEventId,
-        });
+      const norm = normalizeStatus(body.status);
+      if (!norm) return res.status(400).json({ err: "Invalid status" });
+      update.status = norm;
+
+      if (norm === "Cancelled" && doc.googleEventId) {
+        try {
+          await calendar.events.delete({
+            calendarId: provider.calendarId,
+            eventId: doc.googleEventId,
+          });
+        } catch (_) {
+          /* ignore */
+        }
         update.cancelledAt = new Date();
         update.cancelledBy = req.user?.username || "";
       }
     }
+
     if (typeof body.reason === "string") update.reason = body.reason;
 
-    if (!Object.keys(update).length)
+    if (!Object.keys(update).length) {
       return res.status(400).json({ err: "No valid fields to update." });
+    }
 
     const saved = await A.findByIdAndUpdate(id, update, { new: true }).lean();
 
@@ -318,12 +436,15 @@ async function patch(req, res) {
       displayName: 1,
       username: 1,
     }).lean();
-    const patUser = saved.patientId
-      ? await Users.findById(saved.patientId, {
-        displayName: 1,
-        username: 1,
-      }).lean()
-      : null;
+    let patUser = null;
+    if (saved.patientId) {
+      const Patients = PModel();
+      patUser = await Patients.findById(saved.patientId, {
+        name: 1,
+        email: 1,
+      }).lean();
+    }
+
     res.json(map(saved, provUser, patUser));
   } catch (e) {
     res.status(500).json({ err: e.message || "Unknown error" });

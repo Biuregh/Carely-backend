@@ -11,13 +11,9 @@ const {
 } = require("../controllers/gcal.controller.js");
 const verifyToken = require("../middleware/verify-token.js");
 const requireRole = require("../middleware/require-role.js");
+const { requireGoogle } = require("../controllers/google.controller.js");
 
 const router = express.Router();
-
-function requireGoogle(req, res, next) {
-  if (req?.session?.tokens) return next();
-  res.status(401).json({ err: "Not connected to Google." });
-}
 
 router.get("/api/gcal/health", (_req, res) => res.json({ ok: true }));
 router.post("/api/gcal/events", requireGoogle, createEvent);
