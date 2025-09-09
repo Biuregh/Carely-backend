@@ -1,6 +1,7 @@
 {
   "name": "carely-backend",
   "version": "1.0.0",
+  "description": "Carely backend",
   "main": "server.js",
   "scripts": {
     "dev": "nodemon server.js",

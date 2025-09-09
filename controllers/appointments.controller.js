@@ -37,6 +37,10 @@ function fromISOtoLocalParts(iso) {
 function buildISO(dateStr, timeStr) {
   return new Date(`${dateStr}T${timeStr}:00`).toISOString();
 }
+const toMins = (t) => { // NEW helper
+  const [h, m] = String(t).split(":").map(Number);
+  return h * 60 + m;
+};
 
 function map(doc, provUser, patUser) {
   const startISO = buildISO(doc.date, doc.startTime);
@@ -52,7 +56,7 @@ function map(doc, provUser, patUser) {
     provider: { name: provUser?.displayName || provUser?.username || "" },
     providerId: doc.providerId ? String(doc.providerId) : "",
     googleEventId: doc.googleEventId || "",
-    reason: "",
+    reason: doc.reason || "",
     startISO,
     endISO,
   };
@@ -65,6 +69,12 @@ async function list(req, res) {
     const q = {};
     if (providerId) q.providerId = providerId;
     if (timeMin || timeMax) {
+      const minD = timeMin ? new Date(timeMin) : null;
+      const maxD = timeMax ? new Date(timeMax) : null;
+      const range = {};
+      if (minD) range.$gte = `${minD.getFullYear()}-${pad(minD.getMonth() + 1)}-${pad(minD.getDate())}`;
+      if (maxD) range.$lte = `${maxD.getFullYear()}-${pad(maxD.getMonth() + 1)}-${pad(maxD.getDate())}`;
+      if (Object.keys(range).length) q.date = range;
     }
 
     const docs = await A.find(q)
@@ -122,7 +132,7 @@ async function list(req, res) {
 async function create(req, res) {
   try {
     const body = req.body || {};
-    const { providerId, patientId, date, start, end, code } = body;
+    const { providerId, patientId, date, start, end, code, reason } = body;
     if (!providerId)
       return res.status(400).json({ err: "providerId required" });
     if (!date || !start || !end)
@@ -135,6 +145,21 @@ async function create(req, res) {
       return res.status(400).json({ err: "Provider missing calendarId" });
 
     const A = AModel();
+    //no overlap for same date for this specific provider
+    const sNew = toMins(start); 
+    const eNew = toMins(end);   
+    const clash = await A.findOne({ 
+      providerId,
+      date,
+      $expr: {
+        $and: [
+          { $lt: [{ $toInt: { $substr: ["$startTime", 0, 2] } }, eNew / 60] },
+          { $gt: [{ $toInt: { $substr: ["$endTime", 0, 2] } }, sNew / 60] },
+        ],
+      },
+    }).lean();
+    if (clash) return res.status(409).json({ err: "This provider already has an appointment that overlaps that time." });
+
     const pre = await A.create({
       code: code || "",
       date,
@@ -142,8 +167,9 @@ async function create(req, res) {
       endTime: end,
       providerId,
       patientId: patientId || null,
+      reason: reason || "",
       createdById: req.user?._id || null,
-      status: "Scheduled",
+      status: "scheduled",
     });
 
     const auth = getOAuthClient(req);
@@ -164,6 +190,7 @@ async function create(req, res) {
       calendarId: provider.calendarId,
       requestBody: {
         summary,
+        description: reason || "",
         start: {
           dateTime: toLocalRFC3339NoZ(new Date(`${date}T${start}:00`)),
           timeZone: tz,
@@ -212,6 +239,22 @@ async function patch(req, res) {
     if (body.startISO && body.endISO) {
       const s = fromISOtoLocalParts(body.startISO);
       const e = fromISOtoLocalParts(body.endISO);
+      //conflict in reschedule
+      const sNew = toMins(s.time);
+      const eNew = toMins(e.time);
+      const clash = await A.findOne({
+        _id: { $ne: doc._id },
+        providerId: doc.providerId,
+        date: s.date,
+        $expr: {
+          $and: [
+            { $lt: [{ $toInt: { $substr: ["$startTime", 0, 2] } }, eNew / 60] },
+            { $gt: [{ $toInt: { $substr: ["$endTime", 0, 2] } }, sNew / 60] },
+          ],
+        },
+      }).lean();
+      if (clash) return res.status(409).json({ err: "New time overlaps another appointment." });
+
       await calendar.events.patch({
         calendarId: provider.calendarId,
         eventId: doc.googleEventId,
@@ -254,8 +297,8 @@ async function patch(req, res) {
     }
 
     if (typeof body.status === "string") {
-      update.status = body.status;
-      if (body.status === "Cancelled" && doc.googleEventId) {
+      update.status = body.status.toLowerCase();
+      if (body.status === "cancelled" && doc.googleEventId) {
         await calendar.events.delete({
           calendarId: provider.calendarId,
           eventId: doc.googleEventId,
@@ -264,6 +307,7 @@ async function patch(req, res) {
         update.cancelledBy = req.user?.username || "";
       }
     }
+    if (typeof body.reason === "string") update.reason = body.reason;
 
     if (!Object.keys(update).length)
       return res.status(400).json({ err: "No valid fields to update." });
@@ -276,9 +320,9 @@ async function patch(req, res) {
     }).lean();
     const patUser = saved.patientId
       ? await Users.findById(saved.patientId, {
-          displayName: 1,
-          username: 1,
-        }).lean()
+        displayName: 1,
+        username: 1,
+      }).lean()
       : null;
     res.json(map(saved, provUser, patUser));
   } catch (e) {
