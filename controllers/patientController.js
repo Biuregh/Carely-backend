@@ -1,17 +1,11 @@
 "use strict";
 
-/**
- * Patient API — search, CRUD, check-in, list & schedule appointments
- * Integrates with Mongo Appointment + Google Calendar.
- */
-
 const mongoose = require("mongoose");
 const Patient = require("../models/patient");
-const User = require("../models/user"); // providers live here
+const User = require("../models/user"); 
 const Appointment = require("../models/appointment");
 const { google } = require("googleapis");
 
-// ---------- helpers ----------
 const pad = (n) => String(n).padStart(2, "0");
 const TZ = process.env.GCAL_DEFAULT_TZ || "America/New_York";
 

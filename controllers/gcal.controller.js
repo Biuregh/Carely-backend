@@ -38,12 +38,11 @@ function getUserModel() {
   }
 }
 
-/* ------------------------------ Create ------------------------------ */
 async function createEvent(req, res) {
   try {
     const body = req?.body ?? {};
     const {
-      providerId, // may be "ALL" from UI; treat as invalid
+      providerId,
       calendarId,
       summary = "",
       description = "",
@@ -70,7 +69,6 @@ async function createEvent(req, res) {
         return res.status(400).json({ err: "Provider is missing calendarId" });
       targetCalendarId = String(provider.calendarId).trim();
     } else if (isNonEmptyString(calendarId)) {
-      // if providerId is "ALL" or invalid, fall back to explicit calendarId or "primary"
       targetCalendarId = String(calendarId).trim();
     }
 
@@ -94,7 +92,6 @@ async function createEvent(req, res) {
   }
 }
 
-/* ----------------------------- Agenda/Ranges ----------------------------- */
 async function agenda(req, res) {
   try {
     const { providerId } = req.query;
@@ -177,7 +174,6 @@ async function eventsRange(req, res) {
   }
 }
 
-/* --------------------------- Update / Delete --------------------------- */
 async function updateEvent(req, res) {
   try {
     const { eventId } = req.params;

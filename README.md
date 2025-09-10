@@ -1,213 +1,169 @@
-<!-- # React + Vite
-
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
-
-Currently, two official plugins are available:
-
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
-
-## Expanding the ESLint configuration
-
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and [`typescript-eslint`](https://typescript-eslint.io) in your project. -->
-
-
-
-
-
-
-
-
-
 # Carely 🏥
 
-![Carely Logo](https://i.imgur.com/ko0MNnd.jpeg)
-A Doctor Appointment & Patient Check-In App
+![Carely Logo](https://i.imgur.com/ko0MNnd.jpeg)  
+_A Modern Appointment Scheduling & Patient Check-In Platform_
+
+---
+
+## Overview
+
+Carely is a full-stack solution designed to simplify appointment scheduling and patient check-ins for clinics, hospitals, dentists, and service providers. The platform offers tailored tools for patients, receptionists, providers, and administrators in one integrated system.  
+Built with a modern MERN stack, Carely supports patient management, appointment scheduling, secure authentication, and real-time check-in tracking. With **Google Calendar synchronization**, providers can manage their agendas seamlessly across platforms.
+
+---
 
 ## Why Carely?
 
-Every clinic, dentist, hospital, and service provider struggles with the same problem:
+Managing patient check-ins and appointments is one of the biggest challenges for healthcare and service providers. Carely addresses this by offering:
 
-Managing patient check-ins and appointments smoothly.
+- **Beginner-Friendly Development Scope** – CRUD functionality (Create, Read, Update, Delete) built step by step.
+- **Team Collaboration Ready** – Divided into clear modules for efficient teamwork.
+- **Realistic and Useful** – Solves real-world scheduling and check-in problems.
+- **Achievable** – Well-scoped project ideal for both learning and practical deployment.
 
-Carely solves this by giving patients, receptionists, providers, and admins the tools they need in a single app.
-	1•	Beginner-Friendly Scope: CRUD (Create, Read, Update, Delete) – easy to build step by step.
+---
 
-	2•	Perfect for Teamwork: 4 modules for 4 members:
+## MVP Features
 
-	3•	Frontend – Patients: React forms + list page
+### Patient
 
-	4•	Frontend – Appointments: Calendar + booking interface 
+- Check in using phone number + DOB.
+- Update personal information during check-in.
+- View appointment status (scheduled, checked-in, completed).
+- Receive confirmation after check-in.
 
-	5•	Backend – Patients API: Express + MongoDB routes
+### Receptionist
 
-	6•	Backend – Appointments API: Check-in logic + scheduling
+- Add new patients (name, DOB, phone, email).
+- Schedule, reschedule, or cancel appointments.
+- View daily appointment calendar.
 
-It’s realistic, useful, and achievable.
+### Provider
 
-⸻
+- View daily or weekly appointment calendar.
 
-## MVP 
+### Admin
 
-	1•  Patients can check in using name + DOB or phone
+- Create, manage, or remove staff and provider accounts.
+- Assign roles (receptionist, provider, admin).
+- View reports (check-ins, no-shows, appointment volume).
+- Access activity logs for system security.
 
-	2•	Confirmation message after check-in
+---
 
-	3•	Reception can:
-		- Add a new patient (name, DOB, phone, email)
-		- Schedule new appointments
-		- View today’s appointments
-		- Mark patients as checked-in
-		- Reschedule/cancel appointments
+## Main Features
 
-	4•	Providers can:
-		- View daily/weekly calendar of appointments
-		- See if a patient is checked-in
+- **Authentication & Role-Based Access**
+- **Patient Management (CRUD)**
+- **Patient Check-In Flow**
+- **Appointment Scheduling & Status Tracking**
+- **Provider Dashboard**
+- **Admin Tools**
+- **Google Calendar Synchronization**
+- **Testing & Review**
 
-	5•	Admins can:
-		- Create/remove staff & provider accounts
-		- Keep system secure
+---
 
-⸻
+## Stretch Goals
 
-## User Stories
+- SMS/email reminders for patients.
+- Manage multiple clinic locations.
+- Insurance filters for patient bookings.
 
-Patient
-	•	Check in using phone number + DOB
-	•	Update personal info during check-in
-	•	View appointment status (scheduled, checked-in, completed)
-	•	Receive confirmation after check-in
-
-Receptionist
-	•	Schedule new appointments
-	•	Reschedule or cancel appointments
-	•	View daily calendar of appointments
-	•	See which patients have checked in
-
-Provider
-	•	View daily agenda (patients & times)
-	•	See patient details after check-in
-	•	Mark appointments as completed
-	•	Get notified when patients check in
-
-Admin
-	•	Create/manage staff accounts
-	•	Remove staff accounts
-	•	Assign roles (receptionist, provider, admin)
-	•	View reports (check-ins, no-shows, appointment volume)
-	•	See activity logs
-
-⸻
-
-## Stretch Goals 
-	•	SMS/email reminders for patients
-
-	•	Provider agenda sync with Google Calendar
-
-	•	Manage multiple clinic locations
-
-	•	Insurance filters for patients booking appointments
-
-
-⸻
-
-## Main Features 
-	•	Authentication & Roles
-
-	•	Patient Management (CRUD)
-
-	•	Patient Check-in Flow
-
-	•	Appointment Scheduling & Status
-
-	•	Provider Dashboard
-
-	•	Admin Tools
-
-	•	Testing & Review
-
+---
 
 ## Entity Relationship
 
 ```
 USER  {
-	_id: ObjectId,
-	username: String (required),
-	password: String (required),
-	role: { type: String, enum: ["patient","admin","provider","reception"], required: true },
-	appointments: [appointmentSchema]
+    _id: ObjectId,
+    username: String(required)
+    displayName: String (required),
+    hashedPassword: String (required),
+    role: { type: String, enum: ["admin","provider","reception"], required: true },
+    active: Boolean
 }
-
-
 PATIENT {
-	_id: ObjectId,
-	password: String (required),
-	DOB: String (required),
-	phone: Number (required)
+    _id: ObjectId,
+    name: String (required),
+    dob: Date (required),
+    email: String (required),
+    phone: String (required),
+    notes: String,
+    allergies: [String],
+    medicatons: [String]
 }
-
-
 APPOINTMENT {
-	_id: ObjectId,
-	name: String (required),
-	DOB: String (required),
-	phone: String (required),
-	email: String (required),
-	date: String (required),
-	time: String (required),
-	nameOfProvider: String (required),
-	status: { type: String, enum: ["scheduled","checkIn","completed"], required: true }
+    _id: ObjectId,
+    code: String,
+    date: Date (required),
+    startTime: Time (required),
+    endTime: Time (required),
+    providerId: ObjectId (ref: "USER", required),
+    patientId: ObjectId (ref: "PATIENT", required),
+    createdById: ObjectId (ref: "USER", required),
+    status: { type: String, enum: ["scheduled","checkIn","completed", "canceled", "noShow"], required: true },
+    reason: String,
+    googleEventId: String
 }
 ```
 
+---
 
-## Routes
-|Action	|Route	                                         |HTTP Verb
-|-------|------------------------------------------------|----------
-|Index	|/users/:userId/appointments	                 |GET
-|New	|/users/:userId/appointments/new	             |GET
-|Create	|/users/:userId/appointments	                 |POST
-|Show	|/users/:userId/appointments/:appointmentId	     |GET
-|Edit	|/users/:userId/appointments/:appointmentId/edit |GET
-|Update	|/users/:userId/appointments/:appointmentId	     |PUT
-|Delete	|/users/:userId/appointments/:appointmentId	     |DELETE
+## Auth & Users\*\*
 
+| Action  | Route                | HTTP Verb |
+| ------- | -------------------- | --------- |
+| Sign-up | auth/sign-up,        | POST      |
+| Sign-in | auth/sign-in,        | POST      |
+|         | auth/bootstrap-admin | POST      |
 
+### Appointment Routes
 
-## Tech Stack 
-	•	Frontend: React + CSS
-	•	Backend: Express.js + Node.js
-	•	Database: MongoDB
-	•	Authentication: JWT / bcrypt
-	•	Version Control: Git + GitHub
+| Action | Route                                           | HTTP Verb |
+| ------ | ----------------------------------------------- | --------- |
+| Index  | /users/:userId/appointments                     | GET       |
+| New    | /users/:userId/appointments/new                 | GET       |
+| Create | /users/:userId/appointments                     | POST      |
+| Show   | /users/:userId/appointments/:appointmentId      | GET       |
+| Edit   | /users/:userId/appointments/:appointmentId/edit | GET       |
+| Update | /users/:userId/appointments/:appointmentId      | PUT       |
+| Delete | /users/:userId/appointments/:appointmentId      | DELETE    |
 
+### Patient Routes
 
-## Team Structure 
-	•	Frontend – Patients: React forms + patient profile page
-	•	Frontend – Appointments: Calendar view + booking form
-	•	Backend – Patients API: REST endpoints + validation
-	•	Backend – Appointments API: Scheduling logic + check-in
+| Action | Route                | HTTP Verb |
+| ------ | -------------------- | --------- |
+| Index  | /patients            | GET       |
+| New    | /patients/new        | GET       |
+| Create | /patients            | POST      |
+| Show   | /patients/:Id        | GET       |
+| Edit   | /patients/:Id/edit   | GET       |
+| Update | /patients/:patientId | PUT       |
+| Delete | /patients/:patientId | DELETE    |
 
-How to run
+---
 
-# Clone repo
-git clone https://git.generalassemb.ly/marjirad/Carely.git
+## Tech Stack
 
-# Install dependencies
-cd carely
-npm install
+- **Frontend**: React + CSS
+- **Backend**: Express.js + Node.js
+- **Database**: MongoDB
+- **Authentication**: JWT + bcrypt
+- **Calendar Integration**: Google Calendar API
+- **Version Control**: Git + GitHub
 
-# Run backend
-npm run server
+---
 
-# Run frontend
-npm run client
+## Visuals
 
-
-![Patient Check-in](https://i.imgur.com/dEt9eOZ.png)
-![Kiosk ](https://i.imgur.com/8cJUMQe.png)
-![Patient Check-in Dashboard](https://i.imgur.com/qaQcpoM.png)
-![Appointment Scheduling](https://i.imgur.com/X7KY6Kf.png)
-
-
-Trello Link: https://trello.com/b/mub1Eztu/carely
+![Patient Check-in](patient-checkin.png)
+Patient Kiosk — simple check-in by name + DOB/phone.
+![Create New Patient](create-new-patient.png)
+Create New Patient — simple creating new patient by receptionist.
+![Create an Appointment](make-an-appointment.png)
+Create New Appointmentt — Create new appointment by choosing a customer, provider, date and time.
+![Calendar](calendare.png)
+Calendar-look
+![Appointment Manager](appointment-manager.png)
+Manage the Appointments- Simple cancel and Reschedule appointments

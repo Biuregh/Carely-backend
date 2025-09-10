@@ -1,15 +1,5 @@
 "use strict";
 
-/**
- * Appointments Controller (CJS)
- * - Lists appointments (with provider/patient names)
- * - Creates an appointment (Mongo + Google Calendar)
- * - Patches an appointment (reschedule / status / reason) and syncs Google
- *
- * Status enum (models/appointment.js):
- *   ["Scheduled","Confirmed","CheckIn","Completed","Cancelled"]
- */
-
 const mongoose = require("mongoose");
 const { google } = require("googleapis");
 const { getOAuthClient } = require("./google.controller.js");
@@ -200,7 +190,6 @@ async function list(req, res) {
   }
 }
 
-/* -------------------------------- Create ------------------------------- */
 async function create(req, res) {
   try {
     const body = req.body || {};
@@ -303,7 +292,6 @@ async function create(req, res) {
   }
 }
 
-/* --------------------------------- Patch ------------------------------- */
 async function patch(req, res) {
   try {
     const { id } = req.params;
