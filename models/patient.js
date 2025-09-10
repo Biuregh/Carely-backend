@@ -1,16 +1,19 @@
-const mongoose =require("mongoose");
+"use strict";
+
+const mongoose = require("mongoose");
 
 const patientSchema = new mongoose.Schema(
-    {
-        name: { type: String, required: true },
-        email: { type: String, unique: true, required: true, lowercase: true },
-        dob: { type: Date, required: true },
-        phone: { type: String, required: true },
-        notes: String,
-        allergies: [String],
-        medication: [String]
-    },
-    { timestamps: true }
+  {
+    name: { type: String, required: true },
+    email: { type: String, unique: true, required: true, lowercase: true },
+    dob: { type: Date, required: true },
+    phone: { type: String, required: true },
+    notes: String,
+    allergies: [String],
+    medication: [String],
+    active: { type: Boolean, default: true },
+  },
+  { timestamps: true }
 );
 
-module.exports = mongoose.model("Patient", patientSchema)
+module.exports = mongoose.model("Patient", patientSchema);

@@ -6,18 +6,16 @@ const AppointmentSchema = new mongoose.Schema(
   {
     code: { type: String, trim: true },
 
-    // stored as local date + times (HH:mm)
     date: { type: String, required: true },
     startTime: { type: String, required: true },
     endTime: { type: String, required: true },
 
     providerId: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: "User", // providers are Users
+      ref: "User",
       required: true,
     },
 
-    //  make this point to Patient, not User
     patientId: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "Patient",
@@ -34,7 +32,6 @@ const AppointmentSchema = new mongoose.Schema(
       required: true,
     },
 
-    // optional: short reason/type of visit
     reason: { type: String, default: "" },
   },
   { timestamps: true }
