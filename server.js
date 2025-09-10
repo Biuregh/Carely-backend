@@ -23,16 +23,27 @@ mongoose.connection.on("connected", () => {
 
 const app = express();
 
-app.use(cors({ origin: "http://localhost:5173", credentials: true }));
+app.set("trust proxy", 1);
+
+app.use(
+  cors({
+    origin: ["http://localhost:5173", "https://carelyapp.netlify.app"],
+    credentials: true,
+  })
+);
+
 app.use(express.json());
+
 app.use(
   cookieSession({
     name: "sess",
     keys: [process.env.SESSION_SECRET],
     httpOnly: true,
-    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "none" : "lax",
   })
 );
+
 app.use(morgan("dev"));
 
 app.get("/healthz", (req, res) => res.json({ ok: true }));

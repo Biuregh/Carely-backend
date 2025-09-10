@@ -42,7 +42,9 @@ async function callback(req, res) {
     const oAuth2 = makeOAuth();
     const { tokens } = await oAuth2.getToken(code);
     req.session.tokens = tokens;
-    res.redirect("http://localhost:5173/connected");
+
+    const FRONTEND_URL = process.env.FRONTEND_URL || "http://localhost:5173";
+    res.redirect(`${FRONTEND_URL}/connected`);
   } catch (err) {
     res.status(500).json({ err: err.message });
   }
